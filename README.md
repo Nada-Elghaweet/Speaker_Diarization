@@ -1,373 +1,422 @@
-# 🎙️ Speaker Diarization — ANN Project
+<div align="center">
 
-> **"Who Spoke When?"** — An end-to-end speaker diarization pipeline on the AMI Meeting Corpus using CNN triplet embeddings, a Transformer encoder, and WavLM + Whisper combined representations.
+# Speaker Diarization Pipeline
+### WavLM + Whisper + Temporal Transformer
+
+*An end-to-end notebook for answering "who spoke when?" on the AMI Meeting Corpus*
+
+<br/>
+
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-Transformers-FFD21E?style=for-the-badge)](https://huggingface.co/)
+[![Whisper](https://img.shields.io/badge/OpenAI-Whisper-412991?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com/research/whisper)
+[![AMI Corpus](https://img.shields.io/badge/Dataset-AMI_Corpus-00A878?style=for-the-badge)](https://groups.inf.ed.ac.uk/ami/corpus/)
+
+</div>
 
 ---
 
-## 📋 Table of Contents
+## What This Notebook Does
 
-- [Overview](#overview)
+This notebook walks through a complete speaker diarization pipeline — from raw WAV files all the way to a timestamped, speaker-labeled transcript with Word Error Rate evaluation. Everything runs in a single notebook, sequentially, and every intermediate result is saved to disk so you can pick up from any stage without re-running everything from scratch.
+
+The core idea is to combine two pre-trained models — **WavLM** for acoustic speaker identity and **Whisper** for linguistic context — into a single 1280-dimensional feature vector per audio window, then train a lightweight Transformer on top to add temporal awareness across consecutive windows.
+
+---
+
+## Table of Contents
+
+- [Environment Setup](#environment-setup)
 - [Dataset](#dataset)
-- [Pipeline](#pipeline)
-- [Project Structure](#project-structure)
-- [Models](#models)
-  - [CNN Encoder (Triplet Loss)](#1-cnn-encoder-triplet-loss)
-  - [Transformer Encoder](#2-transformer-encoder)
-  - [WavLM + Whisper](#3-wavlm--whisper-combined)
-- [Results](#results)
+- [Audio Preprocessing](#audio-preprocessing)
+- [Speaker Label Assignment](#speaker-label-assignment)
+- [Feature Extraction](#feature-extraction)
+- [Data Splits](#data-splits)
+- [Baseline Classifier](#baseline-classifier)
+- [Temporal Transformer](#temporal-transformer)
+- [Unsupervised Diarization](#unsupervised-diarization)
+- [Transcription](#transcription)
+- [WER / CER Evaluation](#wer--cer-evaluation)
+- [Model Saving](#model-saving)
 - [Outputs](#outputs)
 - [Requirements](#requirements)
-- [Usage](#usage)
-- [Future Work](#future-work)
-- [Team](#team)
 
 ---
 
-## Overview
+## Environment Setup
 
-Speaker diarization is the task of partitioning an audio stream into homogeneous segments according to speaker identity. This project builds a full diarization pipeline from scratch on multi-party meeting recordings, experimenting with three different embedding strategies and evaluating using Diarization Error Rate (DER).
+The first thing the notebook does is redirect all model caches away from the system drive. WavLM and Whisper together can be several gigabytes, so before anything is imported or downloaded, the cache directories for Hugging Face and PyTorch are pointed at a dedicated folder on the D drive.
 
-**Key contributions:**
-- Sliding-window audio segmentation with silence detection (RMS thresholding)
-- CNN encoder trained with triplet loss to produce 256-d speaker embeddings
-- Transformer encoder operating on sequences of CNN embeddings for temporal context
-- WavLM + Whisper combined 1280-d representations
-- Agglomerative clustering for speaker assignment
-- Whisper ASR for per-speaker transcript generation
-- Full evaluation against AMI ground-truth XML annotations
+```python
+os.environ["HF_HOME"]    = r"D:\ANN_Project_Cache\huggingface"
+os.environ["TORCH_HOME"] = r"D:\ANN_Project_Cache\torch"
+```
+
+If you are running this on a machine where C drive space is not a concern, you can remove these lines and everything will download to the default `~/.cache` locations.
+
+Four path constants are then defined and used throughout the rest of the notebook:
+
+| Variable | Points To |
+|:---|:---|
+| `DATA_ROOT` | Root of the AMI corpus — each subfolder is a meeting |
+| `MANUAL_PATH` | AMI manual annotations — XML files for ground truth |
+| `OUTPUT_ROOT` | Where intermediate files are saved (audio chunks, metadata CSVs) |
+| `SAVE_DIR` | Where final artifacts are saved (embeddings, model weights, transcripts) |
 
 ---
 
 ## Dataset
 
-**AMI Meeting Corpus** — 10 multi-party meeting recordings
+The notebook uses the **AMI Meeting Corpus** — a collection of recorded multi-party meetings, each with separate headset microphone tracks per speaker and detailed manual annotations.
 
 | Property | Value |
-|---|---|
-| Meetings used | 10 |
-| Speakers per meeting | 4–5 |
+|:---|:---|
+| Meetings used | 10 (configurable via `NUM_MEETINGS`) |
+| Speakers per meeting | 4 to 5 |
 | Audio sample rate | 16 kHz |
-| Avg. meeting length | ~30 minutes |
-| Annotation format | XML (`.segments` files) |
-| Split | 7 train / 1 val / 2 test |
+| Annotation format | XML — segment-level and word-level |
+| Random seed | 42 |
 
-**Meetings:**
+The notebook randomly samples `NUM_MEETINGS` meetings from whatever is available under `DATA_ROOT`, then does a rough 80/20 meeting-level split. The actual train/val/test splits on embeddings happen later using group-aware splitting.
 
-| Meeting | Split |
-|---|---|
-| EN2001a, EN2002a, EN2003a, EN2004a, EN2005a, EN2009b, IB4001 | TRAIN |
-| IN1001 | VAL |
-| IS1000a, TS3003a | TEST |
-
-Download the AMI corpus from [https://groups.inf.ed.ac.uk/ami/corpus/](https://groups.inf.ed.ac.uk/ami/corpus/) and place it under `data/AMI_Corpus/`.
+Setting `NUM_MEETINGS = None` will use every meeting found in the corpus.
 
 ---
 
-## Pipeline
+## Audio Preprocessing
+
+### Loading and Mixing
+
+Each AMI meeting contains separate WAV files per speaker — one per headset microphone, named `Headset-0` through `Headset-4`. The notebook loads all available headset tracks, truncates them to the same length (the shortest track), sums them into a single mono stream, and normalizes the result to the range [-1, 1].
+
+```python
+mixed = np.sum(list(tracks.values()), axis=0)
+mixed = mixed / (np.max(np.abs(mixed)) + 1e-8)
+```
+
+The small constant `1e-8` prevents division by zero on silent recordings.
+
+### Sliding Windows
+
+Audio is segmented using a sliding window approach:
+
+| Parameter | Value | Reasoning |
+|:---|:---|:---|
+| Window length | 30 seconds | Matches Whisper's native input size; long enough to capture speaker patterns |
+| Hop size | 15 seconds | 50% overlap ensures each speaker transition is captured in at least two windows |
+| Overlap | 15 seconds | Gives the Transformer temporal continuity across adjacent windows |
+
+If a recording is shorter than one window, it is zero-padded to reach 30 seconds and flagged as `is_padded`. The function also handles the tail end of audio — if the last regular window does not reach the end of the recording, one final window is anchored at the last 30 seconds to avoid leaving audio uncovered.
+
+### Silence Detection
+
+Each window's RMS energy is computed and compared against a fixed threshold:
+
+```python
+RMS_SILENCE_THRESHOLD = 0.00061
+```
+
+Windows below this threshold are flagged as silent and excluded from training. This value was calibrated for the AMI corpus — raising it discards more windows including quiet speech, lowering it lets more noise through.
+
+A waveform plot is generated for the first meeting so you can visually verify that the threshold sits at a reasonable level before processing everything.
+
+### Saved Output
+
+Every window is saved as an individual `.npy` file. A metadata CSV is written alongside it with one row per window:
 
 ```
-Audio Input (WAV, 16 kHz)
-        │
-        ▼
-Preprocessing (mix channels, normalize)
-        │
-        ▼
-Sliding Window Segmentation
-  • Window: 30 seconds
-  • Hop:    15 seconds
-  • Overlap: 50%
-        │
-        ▼
-Voice Activity Detection
-  • RMS energy threshold: 0.00061
-  • Remove silent windows
-        │
-        ├──────────────────────┐
-        ▼                      ▼
-XML Label Parsing         Feature Extraction
-(ground truth)            Log-Mel (128 bands)
-                          WavLM (768-d)
-                          Whisper (512-d)
-        │
-        ▼
-Embedding Model
-  ┌──────────────┐
-  │ CNN Encoder  │  → 256-d per window
-  │ Transformer  │  → 256-d with context
-  │ WavLM+Whisper│  → 1280-d combined
-  └──────────────┘
-        │
-        ▼
-Agglomerative Clustering (Ward linkage)
-  • Cosine similarity space
-  • k = number of speakers
-        │
-        ▼
-Timeline Reconstruction
-  • Assign speaker labels to time segments
-        │
-        ▼
-Whisper ASR
-  • Transcribe each labeled segment
-  • Word-level alignment to speakers
-        │
-        ▼
-Evaluation (DER)
-  + Final Output CSV
+meeting, window_idx, start_time, end_time, rms, is_silent, audio_path
 ```
 
 ---
 
-## Project Structure
+## Speaker Label Assignment
 
+Ground-truth speaker labels are extracted from the AMI manual annotation XML files. Each XML file covers one speaker in one meeting and lists the time intervals during which that person was speaking.
+
+For each 30-second audio window, the notebook calculates how many seconds each speaker actually spoke within that window and assigns the label of whichever speaker had the most total speech time — the "dominant speaker." Windows where no speaker is active are labeled as silence.
+
+```python
+overlap += min(window_end, seg_end) - max(window_start, seg_start)
 ```
-Speaker_Diarization/
-│
-├── data/
-│   ├── AMI_Corpus/                  # Raw meeting audio + XML annotations
-│   └── ami_public_manual_1.6.2/     # Manual annotation files
-│
-├── notebooks/
-│   ├── s1.ipynb                     # Preprocessing & feature extraction (HuBERT path)
-│   ├── s4.ipynb                     # Preprocessing variant (WavLM path)
-│   ├── s1_with_whisper.ipynb        # Preprocessing + Whisper feature extraction
-│   ├── CNN_Embeddings_Speaker_      # CNN encoder training + clustering
-│   │   diarization.ipynb
-│   ├── Transformer_Whisper.ipynb    # Whisper ASR + speaker alignment
-│   └── s1_final_trained_            # Final WavLM + Whisper + Transformer pipeline
-│       transformer_WavLM_Whisper.ipynb
-│
-├── outputs/
-│   ├── diarization_output.csv       # Diarized segments (meeting, start, end, speaker)
-│   ├── all_transcripts.csv          # Full transcripts with speaker labels
-│   ├── final_results.csv            # DER scores per meeting per model
-│   └── pipeline_diagram.png         # Pipeline visualization
-│
-├── models/
-│   ├── transformer_best.pth         # Best Transformer encoder checkpoint
-│   └── diarization_pipeline.pth     # Full pipeline checkpoint
-│
-└── README.md
-```
+
+This intersection formula correctly handles partial overlaps at the edges of windows.
+
+All speaker IDs (string format like `EN2002a.MEE071`) are converted to integers using `sklearn.LabelEncoder` and the mapping is saved so predictions can be converted back to readable IDs later.
 
 ---
 
-## Models
+## Feature Extraction
 
-### 1. CNN Encoder (Triplet Loss)
+### Why Two Models?
 
-A convolutional network trained to map 30-second audio windows (represented as 128-band log-mel spectrograms) to a 256-dimensional embedding space where same-speaker segments cluster together.
+WavLM and Whisper are complementary. WavLM was pre-trained specifically to model speaker identity — its representations are sensitive to *how* someone sounds. Whisper's encoder was trained on speech-to-text and picks up on *what* is being said and the linguistic patterns associated with it. Concatenating them gives the downstream model more information to work with than either one alone.
 
-**Architecture:**
+### WavLM — 768 Dimensions
+
+**Model:** `microsoft/wavlm-base-plus`
+
+WavLM processes the raw waveform and produces a sequence of hidden state vectors — one per roughly 20ms of audio. These are aggregated into a single 768-dimensional vector using masked average pooling: only frames corresponding to real audio (not padding) are included in the average. The result is L2-normalized.
+
+Both models are loaded in inference mode with gradients disabled — they are used purely as feature extractors and their weights are not updated during training.
+
+```python
+wavlm.eval()
+for p in wavlm.parameters():
+    p.requires_grad = False
+```
+
+### Whisper — 512 Dimensions
+
+**Model:** `openai/whisper-base` (encoder only, no decoder)
+
+Each audio window is padded or trimmed to exactly 30 seconds, converted to a log-mel spectrogram, and passed through the Whisper encoder. The output sequence is mean-pooled across time to produce a 512-dimensional vector.
+
+### Combined Embedding — 1280 Dimensions
+
+```python
+combined = np.concatenate((wavlm_embs, whisp_embs), axis=1)
+```
+
+The two vectors are concatenated, giving a 1280-dimensional representation per window. These are processed in batches of 8 on GPU or 2 on CPU and saved as a single `.npy` matrix alongside the metadata CSV.
+
+---
+
+## Data Splits
+
+After loading the saved embeddings, three filtering steps are applied before splitting:
+
+1. **Silence removal** — windows flagged as silent are dropped
+2. **Rare class removal** — any speaker with fewer than 5 windows is removed; a classifier cannot learn meaningfully from 1 or 2 examples
+3. **Temporal ordering** — all windows are sorted chronologically within each meeting before splitting, which is required for the sequence-based Transformer to work correctly
+
+Labels are then remapped to contiguous integers starting at 0, since filtering may have created gaps in the label sequence.
+
+### Group-Aware Splitting
+
+A standard random split would be incorrect here. Windows from the same 5-minute block of the same meeting are highly correlated — a model could memorize speaker patterns from the first half of a meeting and score well on the second half without generalizing at all. To prevent this, windows are grouped into 5-minute blocks per meeting and `GroupShuffleSplit` is used to ensure no group appears on both sides of any split.
 
 ```
-Input: Log-Mel Spectrogram (1 × 128 × T)
-  └─ Conv2d(1→32, 3×3) + BatchNorm + ReLU + MaxPool(2)
-  └─ Conv2d(32→64, 3×3) + BatchNorm + ReLU + MaxPool(2)
-  └─ Conv2d(64→128, 3×3) + BatchNorm + ReLU + MaxPool(2)
-  └─ AdaptiveAvgPool → Flatten
-  └─ Linear(128×16×16 → 256) → L2 Normalize
-Output: 256-d speaker embedding
+Split           Proportion
+Train             ~64%
+Validation        ~16%
+Test              ~20%
 ```
 
-**Training:**
+After splitting, validation and test sets are further filtered to only include speakers that also appear in the training set.
 
-| Hyperparameter | Value |
-|---|---|
-| Loss | Triplet Margin Loss (margin = 0.3) |
-| Optimizer | Adam (lr = 1e-4) |
+---
+
+## Baseline Classifier
+
+Before training the Transformer, a logistic regression is fitted directly on the raw 1280-d embeddings. This tells you how much speaker information is already present in the features without any temporal modeling — the Transformer should meaningfully exceed this number.
+
+```python
+make_pipeline(
+    StandardScaler(),
+    LogisticRegression(max_iter=5000, class_weight="balanced", random_state=42)
+)
+```
+
+`class_weight="balanced"` adjusts for speakers with fewer windows. `max_iter=5000` is necessary because convergence with 1280 features and multiple classes takes longer than the scikit-learn default of 100 iterations.
+
+A 3D PCA scatter plot is also generated at this stage to visually inspect whether speakers form separable clusters in the embedding space before any neural model is involved.
+
+---
+
+## Temporal Transformer
+
+### Sequence Dataset
+
+Audio windows are grouped into sequences of 5 consecutive windows. Each sequence covers roughly 2.5 minutes of audio with 50% overlap between adjacent windows. The label for each sequence is the speaker of the **last** window — the model learns to predict who is speaking now given recent context.
+
+```python
+SEQUENCE_LENGTH = 5
+```
+
+### Model Architecture
+
+```
+Input:  [batch, 5, 1280]
+         |
+         Linear(1280 -> 256)          # project to smaller internal dimension
+         |
+         TransformerEncoder
+           2 layers
+           4 attention heads
+           feedforward dim: 512
+           dropout: 0.3
+         |
+         Mean pool across sequence dimension
+         |
+         Linear(256 -> num_classes)
+Output: [batch, num_classes]
+```
+
+The model has a dual-mode forward pass controlled by an `extract_embeddings` flag. When set to `True`, it returns the 256-dimensional pooled representation for use in K-Means clustering. When `False`, it returns class logits for supervised training and evaluation.
+
+### Training Configuration
+
+| Setting | Value |
+|:---|:---|
+| Loss | CrossEntropyLoss |
+| Optimizer | AdamW |
+| Learning rate | 0.001 |
+| Weight decay | 0.01 |
 | Batch size | 64 |
-| Epochs | 20 (early stopping, patience = 4) |
-| Embedding dim | 256 |
+| Epochs | 30 |
 
-**Why triplet loss?** It pulls embeddings from the same speaker together and pushes embeddings from different speakers apart, without needing hard class labels — just anchor/positive/negative triplets.
-
----
-
-### 2. Transformer Encoder
-
-A Transformer encoder that refines CNN embeddings by attending over a 30-second context window (10 consecutive 3-second CNN chunks). This allows the model to leverage temporal context — a speaker's identity across a sequence of windows — rather than treating each window independently.
-
-**Architecture:**
-
-```
-Input: Sequence of CNN embeddings (B × 10 × 256)
-  └─ Linear projection (256 → 256)
-  └─ Positional Encoding (Embedding, max_len=512)
-  └─ TransformerEncoderLayer × 2
-       nhead=4, d_feedforward=512, dropout=0.3
-  └─ Per-token output: 256-d
-```
-
-**Training:**
-
-| Hyperparameter | Value |
-|---|---|
-| Loss | Sequence Triplet Loss (in-batch, margin = 0.3) |
-| Optimizer | Adam (lr = 1e-4) + ReduceLROnPlateau |
-| Epochs | 30 (early stopping, patience = 8) |
-| Context | 30 seconds (10 × 3s CNN chunks) |
-| Best val loss | 0.1904 |
+Training and validation accuracy are tracked per epoch and plotted at the end. A healthy training run shows both curves rising together — a large gap between train and validation accuracy is a sign of overfitting.
 
 ---
 
-### 3. WavLM + Whisper (Combined)
+## Unsupervised Diarization
 
-Instead of using CNN-extracted features, this approach extracts embeddings directly from two pre-trained models and concatenates them for a richer 1280-dimensional representation.
+After supervised training, the Transformer's internal representations are used for open-set diarization — the more realistic scenario where speaker identities are not known in advance.
 
-| Model | Source | Output | Purpose |
-|---|---|---|---|
-| WavLM | `microsoft/wavlm-base-plus` | 768-d | Speaker identity, acoustic features |
-| Whisper | `openai/whisper-base` (encoder) | 512-d | Linguistic + acoustic context |
-| **Combined** | Concatenation | **1280-d** | Rich speaker representation |
+The Transformer is run over the test set with `extract_embeddings=True` to collect 256-dimensional vectors. K-Means clustering is then run **independently per meeting**, using the ground-truth number of speakers as K. This simulates a real deployment where the audio belongs to one session and the goal is to separate the speakers within it, without any predefined identity labels.
 
-**Why WavLM?** Pre-trained on 94k hours of speech with an objective specifically designed to model speaker identity and overlapping speech — state of the art for speaker verification tasks.
+Two metrics are reported per meeting and averaged:
 
-**Why Whisper?** Its encoder captures both acoustic and linguistic context, giving the model information about *what* is being said as well as *how* it sounds — complementary to WavLM's speaker-identity focus.
+**Adjusted Rand Index (ARI)** measures agreement between predicted clusters and ground truth, adjusted for chance. It ranges from -1 to 1 — higher is better, 0 means the clustering is no better than random.
+
+**Silhouette Score** measures how compact and well-separated the clusters are without using labels at all. It ranges from -1 to 1 — higher means cleaner separation.
+
+A side-by-side 2D PCA scatter plot shows ground-truth speaker distributions next to K-Means cluster assignments, giving a visual sense of how well the learned representations support unsupervised separation.
 
 ---
 
-## Results
+## Transcription
 
-Evaluation metric: **Diarization Error Rate (DER)**
+Each test window is transcribed using **faster-whisper** — a CTranslate2-optimized reimplementation of Whisper that runs 2 to 4 times faster than the original library with no change in output quality.
+
+```python
+WhisperModel("small", device=device, compute_type="float16")  # GPU
+WhisperModel("small", device=device, compute_type="int8")     # CPU
+```
+
+The `vad_filter=True` option applies Voice Activity Detection internally, skipping silent regions and reducing hallucinated text on quiet windows.
+
+The final output is a table with one row per audio window:
+
+| Column | Contents |
+|:---|:---|
+| `meeting` | Meeting identifier |
+| `start_time` / `end_time` | Window boundaries in seconds |
+| `true_speaker_id` | Ground-truth speaker from XML annotations |
+| `predicted_supervised_id` | Transformer classifier prediction |
+| `predicted_speaker_cluster` | K-Means cluster assignment |
+| `transcript` | Whisper-generated text for this window |
+
+This table is saved as `final_speaker_diarization_transcription.csv`.
+
+---
+
+## WER / CER Evaluation
+
+Transcription quality is evaluated against the AMI word-level XML annotations. These files contain every word spoken in a meeting along with precise start and end timestamps.
+
+For each 30-second window, the notebook collects all ground-truth words whose timestamps fall within that window, joins them into a reference string, and compares it to the Whisper output using the `jiwer` library.
 
 ```
-DER = (False Alarm + Missed Speech + Speaker Confusion) / Total Speech Duration
+Word Error Rate (WER)       =  (Substitutions + Insertions + Deletions) / Total Reference Words
+Character Error Rate (CER)  =  same formula applied at the character level
 ```
-Lower is better.
 
-| Meeting | Split | DER CNN | DER Transformer | DER Smoothed |
-|---|---|---|---|---|
-| EN2001a | TRAIN | 26.5% | 55.8% | 57.1% |
-| EN2002a | TRAIN | 47.0% | 53.7% | 48.6% |
-| EN2003a | TRAIN | 30.4% | 35.4% | **28.2%** |
-| EN2004a | TRAIN | **35.7%** | 43.8% | 55.0% |
-| EN2005a | TRAIN | **48.9%** | 59.6% | 42.9% |
-| EN2009b | TRAIN | **39.2%** | 51.5% | 35.0% |
-| IB4001 | TRAIN | 46.8% | 46.0% | **40.6%** |
-| IN1001 | VAL | **51.6%** | 56.7% | 50.0% |
-| IS1000a | TEST | **51.2%** | 71.0% | 60.0% |
-| TS3003a | TEST | **37.5%** | 63.4% | 52.0% |
+Three values are printed per evaluation:
 
-**Average DER:**
+- **WER** — overall word-level error rate
+- **CER** — character-level error rate, less affected by tokenization differences
+- **Linguistic Accuracy** — `max(0, 1 - WER)`, floored at zero since WER can exceed 100% when many extra words are inserted
 
-| Model | Avg DER |
-|---|---|
-|  CNN (best) | **41.5%** |
-| Smoothed | 47.9% |
-| Transformer | 54.5% |
+A short sample comparison of ground-truth text versus Whisper output is printed for manual inspection.
 
-The CNN encoder with triplet loss achieved the best average DER across all meetings, suggesting that for this dataset size, simpler embeddings with direct clustering outperform the Transformer's added complexity.
+To evaluate a different meeting, change `TARGET_MEETING` at the top of the cell to any meeting ID present in the test split.
+
+---
+
+## Model Saving
+
+All artifacts needed to reproduce inference are saved under `SAVE_DIR/web_models/`:
+
+| File | Contents |
+|:---|:---|
+| `temporal_transformer.pt` | Transformer state dict |
+| `wavlm_encoder.pt` | WavLM encoder state dict |
+| `feature_extractor/` | Hugging Face feature extractor config and vocabulary |
+| `baseline_clf.joblib` | Scikit-learn pipeline — StandardScaler and LogisticRegression |
+| `speaker_label_mapping.csv` | Mapping from integer labels back to speaker ID strings |
+
+To reload the Transformer for inference:
+
+```python
+model = SpeakerTransformerRefiner(num_train_classes=N)
+model.load_state_dict(torch.load("web_models/temporal_transformer.pt"))
+model.eval()
+```
+
+The Whisper model used for transcription is not saved here — faster-whisper downloads and caches it automatically on first use.
 
 ---
 
 ## Outputs
 
-### `diarization_output.csv`
-Speaker timeline for each meeting.
-
-```
-meeting, start, end, speaker, duration, split
-EN2001a, 1.5,   9.0,  Speaker_4, 7.5, TRAIN
-EN2001a, 9.0,   18.0, Speaker_2, 9.0, TRAIN
-...
-```
-
-### `all_transcripts.csv`
-Word-aligned speaker transcripts generated by Whisper.
-
-```
-meeting, start,  end,   speaker,   text
-EN2001a, 2.98,   5.94,  Speaker_4, "Okay. Okay."
-EN2001a, 11.12,  17.72, Speaker_2, "Does anyone want to see Steve's feedback..."
-...
-```
+| File | Description |
+|:---|:---|
+| `windows_audio_30s_15s_hop/` | Individual `.npy` audio chunks, one per window |
+| `windows_metadata.csv` | Audio window index with RMS values and silence flags |
+| `labeled_metadata.csv` | Same index with dominant speaker labels added |
+| `speaker_classes.csv` | Ordered list of speaker ID strings matching integer labels |
+| `wavlm_whisper_embeddings_1280.npy` | Full embedding matrix, one 1280-d row per window |
+| `wavlm_whisper_embeddings_metadata.csv` | Metadata aligned row-for-row to the embedding matrix |
+| `final_speaker_diarization_transcription.csv` | Diarized transcript with ground truth and predictions |
+| `web_models/` | All saved model artifacts |
 
 ---
 
 ## Requirements
 
 ```
-torch>=2.0
+torch >= 2.0
 torchaudio
 transformers
 openai-whisper
+faster-whisper
 librosa
 soundfile
 numpy
 pandas
 scikit-learn
-tqdm
 matplotlib
-umap-learn
+tqdm
+jiwer
+joblib
 ```
 
 Install with:
+
 ```bash
-pip install torch torchaudio transformers openai-whisper librosa soundfile numpy pandas scikit-learn tqdm matplotlib umap-learn
+pip install torch torchaudio transformers openai-whisper faster-whisper \
+            librosa soundfile numpy pandas scikit-learn matplotlib tqdm \
+            jiwer joblib
 ```
 
 ---
 
-## Usage
+## Notes
 
-### 1. Preprocessing
-
-Run `s1.ipynb` (or `s4.ipynb` for the WavLM path) to:
-- Load AMI meetings
-- Apply sliding-window segmentation (30s / 15s hop)
-- Filter silent windows via RMS threshold
-- Save audio chunks and log-mel features
-
-### 2. CNN Training + Diarization
-
-Run `CNN_Embeddings_Speaker_diarization.ipynb` to:
-- Parse XML speaker annotations
-- Build the labeled CNN dataset
-- Train the `CNNEncoder` with triplet loss
-- Extract embeddings and run agglomerative clustering
-- Compute DER vs. ground truth
-
-### 3. Transformer Training
-
-Run after CNN: the Transformer takes sequences of CNN embeddings as input.
-See the Transformer notebook for training and UMAP visualization of embeddings.
-
-### 4. WavLM + Whisper Pipeline
-
-Run `s1_final_trained_transformer_WavLM_Whisper.ipynb` to:
-- Extract WavLM (768-d) and Whisper encoder (512-d) features
-- Concatenate → 1280-d vectors
-- Train the Transformer classifier on combined embeddings
-- Evaluate DER
-
-### 5. Transcript Generation
-
-Run `Transformer_Whisper.ipynb` to:
-- Transcribe each meeting with Whisper (`base` model)
-- Align word-level timestamps to diarization output
-- Group words into utterances per speaker
-- Export `all_transcripts.csv`
+- The notebook is designed to run top-to-bottom. Each cell saves its outputs, so if a later cell fails you can reload from disk without re-running the expensive feature extraction step.
+- `BATCH_SIZE` is automatically set to 8 on GPU and 2 on CPU. On a CPU-only machine, the embedding extraction step will take a while — expect several minutes per meeting.
+- The silence threshold (`0.00061`) and sequence length (`5`) were chosen for the AMI corpus and may need adjustment on other datasets.
+- `GroupShuffleSplit` is used deliberately throughout. A standard random split leaks information between temporally adjacent windows and produces accuracy numbers that look better than they actually are.
 
 ---
 
-## Future Work
+<div align="center">
 
-1. **End-to-end learning** — Train a unified model for segmentation, embedding, and clustering jointly to reduce error accumulation across stages.
-2. **Overlapping speech detection** — Add a dedicated head for detecting and handling simultaneous speakers.
-3. **Larger datasets** — Evaluate on the full AMI corpus (170+ meetings), CALLHOME, VoxConverse, and CHiME-6.
-4. **Domain adaptation** — Fine-tune on telephone calls, medical interviews, or broadcast speech.
-5. **Automatic speaker count estimation** — Replace fixed `k` with BIC, eigen-gap, or a learned threshold for fully unsupervised diarization.
-6. **Real-time inference** — Optimize for streaming/online diarization with chunk-based processing.
+ANN Project — Speaker Diarization
 
----
+[github.com/Nada-Elghaweet/Speaker_Diarization](https://github.com/Nada-Elghaweet/Speaker_Diarization)
 
-## Team
-1-Maya Anwar
-2-Nada Ibrahim
-3-Steven Willson
-4-Abdallah khaled
-5-Youssef Ahmed 
-
-**ANN Project — Speaker Diarization**
-GitHub: [github.com/Nada-Elghaweet/Speaker_Diarization](https://github.com/Nada-Elghaweet/Speaker_Diarization)
+</div>
