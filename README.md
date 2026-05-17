@@ -19,7 +19,7 @@ A speaker diarization and transcription pipeline built on the AMI Meeting Corpus
 
 **AMI Meeting Corpus** — multi-party meeting recordings with per-speaker headset audio and manual segment annotations.
 
-- Omar's experiments: 10 meetings (`EN2001a`, `EN2002a`, `EN2003a`, `EN2004a`, `EN2005a`, `EN2009b`, `IB4001`, `IN1001`, `IS1000a`, `TS3003a`)
+- Nada's experiments: 10 meetings (`EN2001a`, `EN2002a`, `EN2003a`, `EN2004a`, `EN2005a`, `EN2009b`, `IB4001`, `IN1001`, `IS1000a`, `TS3003a`)
 - Maya/Steven/Hubert's experiments: 30 meetings (EN and ES series)
 - Annotations: `ami_public_manual_1.6.2` segment XML files
 
