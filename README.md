@@ -58,7 +58,7 @@ Whisper transcription -> speaker-attributed transcript
 
 | Experiment | Window | Hop | Overlap |
 |---|---|---|---|
-| Omar (CNN/Transformer) | 3 s | 1.5 s | 50% |
+| Nada (CNN/Transformer) | 3 s | 1.5 s | 50% |
 | Maya/Steven/Hubert (HuBERT + Transformer) | 30 s | 15 s | 50% |
 | Abdellah (HuBERT) | 30 s | 25 s | 17% |
 
@@ -82,7 +82,7 @@ For each audio window, the AMI segment XML files are parsed to compute the overl
 
 ---
 
-### Omar — CNN from scratch + Transformer from scratch + Whisper
+### Nada — CNN from scratch + Transformer from scratch + Whisper
 
 **Notebooks:**
 - `CNN_Embeddings_Speaker_Diarization.ipynb`
@@ -320,7 +320,7 @@ h5py
 umap-learn
 ```
 
-Omar's experiments run on Google Colab with GPU. Maya/Steven/Hubert's experiments run on Google Colab with GPU. Abdellah's experiments run locally on Windows (CPU).
+Nada's experiments run on Google Colab with GPU. Maya/Steven/Hubert's experiments run on Google Colab with GPU. Abdellah's experiments run locally on Windows (CPU).
 
 ---
 
@@ -328,8 +328,8 @@ Omar's experiments run on Google Colab with GPU. Maya/Steven/Hubert's experiment
 
 | Metric | Used by | Description |
 |---|---|---|
-| DER | Omar | Fraction of non-silence windows assigned to the wrong speaker after Hungarian alignment |
-| Triplet accuracy | Omar | Fraction of triplets where anchor is closer to positive than negative |
+| DER | Nada | Fraction of non-silence windows assigned to the wrong speaker after Hungarian alignment |
+| Triplet accuracy | Nada | Fraction of triplets where anchor is closer to positive than negative |
 | Classification accuracy | Maya/Steven/Hubert | Logistic Regression probe on embeddings, grouped test split |
 | ARI | Maya/Steven/Hubert | Adjusted Rand Index between predicted clusters and true labels |
 | NMI | Maya/Steven/Hubert | Normalized Mutual Information |
@@ -344,5 +344,4 @@ Omar's experiments run on Google Colab with GPU. Maya/Steven/Hubert's experiment
 - All experiments use the AMI manual segment XML files (`ami_public_manual_1.6.2`) for speaker label assignment. No ground-truth transcript is available, so ASR output is qualitative only.
 - Silence windows are excluded from training and evaluation in all experiments.
 - Speaker labels are local to each meeting; a global speaker ID is formed as `{meeting_id}.{speaker_letter}`.
-- The Transformer in Omar's pipeline is trained with sequence-level triplet loss. The Transformer in Maya/Steven/Hubert's pipeline is trained with CrossEntropy and Supervised Contrastive Loss.
-- Youssef's WavLM notebook is not included in this repository at the time of writing.
+- The Transformer in Nada's pipeline is trained with sequence-level triplet loss. The Transformer in Maya/Steven/Hubert's pipeline is trained with CrossEntropy and Supervised Contrastive Loss.
