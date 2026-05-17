@@ -253,7 +253,7 @@ Lower is better.
 
 | Model | Avg DER |
 |---|---|
-| ✅ CNN (best) | **41.5%** |
+|  CNN (best) | **41.5%** |
 | Smoothed | 47.9% |
 | Transformer | 54.5% |
 
