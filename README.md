@@ -2,11 +2,6 @@
 
 > **"Who Spoke When?"** — An end-to-end speaker diarization pipeline on the AMI Meeting Corpus using CNN triplet embeddings, a Transformer encoder, and WavLM + Whisper combined representations.
 
-[![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://python.org)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)](https://pytorch.org)
-[![HuggingFace](https://img.shields.io/badge/🤗-Transformers-yellow)](https://huggingface.co)
-[![Whisper](https://img.shields.io/badge/OpenAI-Whisper-green)](https://github.com/openai/whisper)
-
 ---
 
 ## 📋 Table of Contents
