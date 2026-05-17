@@ -8,10 +8,10 @@ A speaker diarization and transcription pipeline built on the AMI Meeting Corpus
 
 | Member | Approach |
 |---|---|
-| Maya yassin , Steven wislon , Hubert | HuBERT + Transformer + Whisper |
-| Youssef eldeep | WavLM + Whisper |
-| Abdellah khaled | HuBERT + Whisper |
-| Nada Ibrahim Elghaweet | CNN (from scratch) + Transformer (from scratch) + Whisper |
+| Maya, Steven, Hubert | HuBERT + Transformer + Whisper |
+| Youssef | WavLM + Whisper |
+| Abdellah | HuBERT + Whisper |
+| Nada | CNN (from scratch) + Transformer (from scratch) + Whisper |
 
 ---
 
@@ -68,7 +68,7 @@ RMS energy is computed per window. Windows below the threshold are flagged as si
 
 | Experiment | RMS threshold |
 |---|---|
-| Omar | 0.00078 |
+| Nada | 0.00078 |
 | Maya/Steven/Hubert | 0.00061 |
 | Abdellah | 0.005 |
 
@@ -257,7 +257,7 @@ Faster-Whisper (`small`) transcribes each 30-second audio window with VAD filter
 
 **Notebook:** `HuBERT_Whisper_Diarization.ipynb`
 
-**Dataset:** 10 meetings (same as Omar), 30 s windows, 25 s hop.
+**Dataset:** 10 meetings (same as Nada), 30 s windows, 25 s hop.
 
 **Stage 1 — HuBERT feature extraction**
 
@@ -281,11 +281,47 @@ Whisper (`openai/whisper-small`) transcribes each 30-second audio window via the
 
 ---
 
+### Youssef — WavLM + Whisper
+
+**Notebook:** `WavLM_Whisper_Diarization.ipynb`
+
+**Dataset:** AMI Meeting Corpus. Evaluated on meeting `TS3011a` (100 windows).
+
+**Stage 1 — WavLM feature extraction**
+
+Raw audio windows are passed through a WavLM-based feature extractor as a frozen pretrained model. Mean pooling over the frame sequence produces speaker embeddings per window.
+
+**Stage 2 — Clustering**
+
+KMeans clusters the WavLM embeddings. Hungarian algorithm alignment maps predicted cluster IDs to true speaker IDs.
+
+**Stage 3 — Transcription and evaluation**
+
+Whisper transcribes each audio window. Ground-truth word transcripts are extracted from the AMI manual word XML files (`ami_public_manual_1.6.2/words`). Each word's timestamp is matched to the corresponding audio window and used as the reference for WER/CER computation.
+
+Results on `TS3011a` (100 windows evaluated):
+
+| Metric | Value |
+|---|---|
+| Word Error Rate (WER) | 52.27% |
+| Character Error Rate (CER) | 28.77% |
+| Transcription Accuracy (1 - WER) | 47.73% |
+
+**Saved artifacts:**
+
+| File | Description |
+|---|---|
+| `hubert_speaker_segments.csv` | Per-window speaker and cluster labels |
+| `speaker_aware_transcript.csv` | Speaker-attributed transcript (CSV) |
+| `speaker_aware_transcript.txt` | Speaker-attributed transcript (plain text) |
+
+---
+
 ## Repository Structure
 
 ```
 .
-├── omar/
+├── nada/
 │   ├── CNN_Embeddings_Speaker_Diarization.ipynb
 │   ├── Transformer_encoder_Diarization.ipynb
 │   └── Transformer_Whisper.ipynb
@@ -294,6 +330,8 @@ Whisper (`openai/whisper-small`) transcribes each 30-second audio window via the
 │   └── HuBERT_Whisper_Transcription.ipynb
 ├── abdellah/
 │   └── HuBERT_Whisper_Diarization.ipynb
+├── youssef/
+│   └── WavLM_Whisper_Diarization.ipynb
 └── README.md
 ```
 
@@ -318,9 +356,10 @@ openai-whisper / faster-whisper
 soundfile
 h5py
 umap-learn
+jiwer
 ```
 
-Nada's experiments run on Google Colab with GPU. Maya/Steven/Hubert's experiments run on Google Colab with GPU. Abdellah's experiments run locally on Windows (CPU).
+Nada's experiments run on Google Colab with GPU. Maya/Steven/Hubert's experiments run on Google Colab with GPU. Abdellah's and Youssef's experiments run locally on Windows (CPU).
 
 ---
 
@@ -335,6 +374,7 @@ Nada's experiments run on Google Colab with GPU. Maya/Steven/Hubert's experiment
 | NMI | Maya/Steven/Hubert | Normalized Mutual Information |
 | Purity | Maya/Steven/Hubert | Fraction of windows assigned to the dominant class in each cluster |
 | Silhouette | Maya/Steven/Hubert | Internal cluster separation score |
+| WER / CER | Youssef | Word/character error rate against AMI manual word XML transcripts |
 | Clustering accuracy | Abdellah | Hungarian-aligned KMeans accuracy |
 
 ---
