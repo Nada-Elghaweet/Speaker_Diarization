@@ -69,7 +69,7 @@ RMS energy is computed per window. Windows below the threshold are flagged as si
 | Experiment | RMS threshold |
 |---|---|
 | Nada | 0.00078 |
-| Maya/Steven/Hubert | 0.00061 |
+| Maya/Steven | 0.00061 |
 | Abdellah | 0.005 |
 
 ### Speaker label assignment
@@ -195,7 +195,7 @@ Output: 2,101 utterances across all 10 meetings, saved as per-meeting CSV and TX
 
 ---
 
-### Maya, Steven, Hubert — HuBERT + Transformer + Whisper
+### Maya, Steven — HuBERT + Transformer + Whisper
 
 **Notebooks:** `HuBERT_Transformer_Diarization.ipynb`, `HuBERT_Whisper_Transcription.ipynb`
 
@@ -325,7 +325,7 @@ Results on `TS3011a` (100 windows evaluated):
 │   ├── CNN_Embeddings_Speaker_Diarization.ipynb
 │   ├── Transformer_encoder_Diarization.ipynb
 │   └── Transformer_Whisper.ipynb
-├── maya_steven_hubert/
+├── maya_steven/
 │   ├── HuBERT_Transformer_Diarization.ipynb
 │   └── HuBERT_Whisper_Transcription.ipynb
 ├── abdellah/
@@ -359,7 +359,7 @@ umap-learn
 jiwer
 ```
 
-Nada's experiments run on Google Colab with GPU. Maya/Steven/Hubert's experiments run on Google Colab with GPU. Abdellah's and Youssef's experiments run locally on Windows (CPU).
+Nada's experiments run on Google Colab with GPU. Maya/Steven's experiments run on Google Colab with GPU. Abdellah's and Youssef's experiments run locally on Windows (CPU).
 
 ---
 
@@ -370,10 +370,10 @@ Nada's experiments run on Google Colab with GPU. Maya/Steven/Hubert's experiment
 | DER | Nada | Fraction of non-silence windows assigned to the wrong speaker after Hungarian alignment |
 | Triplet accuracy | Nada | Fraction of triplets where anchor is closer to positive than negative |
 | Classification accuracy | Maya/Steven/Hubert | Logistic Regression probe on embeddings, grouped test split |
-| ARI | Maya/Steven/Hubert | Adjusted Rand Index between predicted clusters and true labels |
-| NMI | Maya/Steven/Hubert | Normalized Mutual Information |
-| Purity | Maya/Steven/Hubert | Fraction of windows assigned to the dominant class in each cluster |
-| Silhouette | Maya/Steven/Hubert | Internal cluster separation score |
+| ARI | Maya/Steven | Adjusted Rand Index between predicted clusters and true labels |
+| NMI | Maya/Steven | Normalized Mutual Information |
+| Purity | Maya/Steven | Fraction of windows assigned to the dominant class in each cluster |
+| Silhouette | Maya/Steven | Internal cluster separation score |
 | WER / CER | Youssef | Word/character error rate against AMI manual word XML transcripts |
 | Clustering accuracy | Abdellah | Hungarian-aligned KMeans accuracy |
 
