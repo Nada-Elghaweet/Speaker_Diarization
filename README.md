@@ -58,7 +58,7 @@ Whisper transcription -> speaker-attributed transcript
 
 | Experiment | Window | Hop | Overlap |
 |---|---|---|---|
-| Nada (CNN/Transformer) | 3 s | 1.5 s | 50% |
+| Nada (CNN) | 3 s | 1.5 s | 50% |
 | Nada (Transformer) | 30 s | 15 s | 50% |
 | Maya/Steven/Hubert (HuBERT + Transformer) | 30 s | 15 s | 50% |
 | Abdellah (HuBERT) | 30 s | 25 s | 17% |
