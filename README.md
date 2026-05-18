@@ -8,7 +8,7 @@ A speaker diarization and transcription pipeline built on the AMI Meeting Corpus
 
 | Member | Approach |
 |---|---|
-| Maya, Steven, Hubert | HuBERT + Transformer + Whisper |
+| Maya, Steven | HuBERT + Transformer + Whisper |
 | Youssef | WavLM + Whisper |
 | Abdellah | HuBERT + Whisper |
 | Nada | CNN (from scratch) + Transformer (from scratch) + Whisper |
@@ -20,7 +20,7 @@ A speaker diarization and transcription pipeline built on the AMI Meeting Corpus
 **AMI Meeting Corpus** — multi-party meeting recordings with per-speaker headset audio and manual segment annotations.
 
 - Nada's experiments: 10 meetings (`EN2001a`, `EN2002a`, `EN2003a`, `EN2004a`, `EN2005a`, `EN2009b`, `IB4001`, `IN1001`, `IS1000a`, `TS3003a`)
-- Maya/Steven/Hubert's experiments: 30 meetings (EN and ES series)
+- Maya/Steven's experiments: 30 meetings (EN and ES series)
 - Annotations: `ami_public_manual_1.6.2` segment XML files
 
 ---
